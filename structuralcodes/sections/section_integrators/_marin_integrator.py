@@ -55,6 +55,7 @@ class MarinIntegrator(SectionIntegrator):
         if geo is not self._rotation_cache_geo:
             self._rotation_cache_geo = geo
             self._rotation_cache = {}
+        # Round the key so angle float-noise can't cause spurious cache misses.
         key = round(angle, 12)
         rotated_geom = self._rotation_cache.get(key)
         if rotated_geom is None:
