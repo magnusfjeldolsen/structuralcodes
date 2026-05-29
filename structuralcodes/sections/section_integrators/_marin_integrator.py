@@ -24,6 +24,44 @@ from ._section_integrator import SectionIntegrator
 class MarinIntegrator(SectionIntegrator):
     """Section integrator based on the Marin algorithm."""
 
+    def __init__(self) -> None:
+        """Initialize a MarinIntegrator."""
+        # Memoization of the rotated geometry (see _rotated_geometry).
+        self._rotation_cache_geo: t.Optional[CompoundGeometry] = None
+        self._rotation_cache: t.Dict[float, CompoundGeometry] = {}
+        # Set to False to bypass the cache (used by benchmarks/debugging).
+        self.cache_rotations: bool = True
+
+    def _rotated_geometry(
+        self, geo: CompoundGeometry, angle: float
+    ) -> CompoundGeometry:
+        """Return ``geo`` rotated by ``angle``, memoized per (geo, angle).
+
+        The rotation applied before Marin integration depends only on the
+        imposed curvature direction (the orientation of the strain plane),
+        never on material state. Within a single calculation the input
+        geometry object is fixed and the angle takes at most a couple of
+        distinct values, so caching turns the hundreds of expensive shapely
+        rotations performed by the equilibrium solvers into one per distinct
+        angle. The cache is keyed on the actual angle, so a genuinely
+        different curvature direction (e.g. true biaxial bending) simply
+        misses and recomputes -- correctness never relies on the angle being
+        constant.
+        """
+        if not self.cache_rotations:
+            return geo.rotate(angle)
+        # The cache only needs to hold the geometry currently being analysed;
+        # reset it whenever a different geometry object is passed in.
+        if geo is not self._rotation_cache_geo:
+            self._rotation_cache_geo = geo
+            self._rotation_cache = {}
+        key = round(angle, 12)
+        rotated_geom = self._rotation_cache.get(key)
+        if rotated_geom is None:
+            rotated_geom = geo.rotate(angle)
+            self._rotation_cache[key] = rotated_geom
+        return rotated_geom
+
     def _rotate_geometry(
         self, geo: CompoundGeometry, strain: ArrayLike, **kwargs
     ) -> t.Tuple[float, CompoundGeometry, ArrayLike]:
@@ -33,7 +71,7 @@ class MarinIntegrator(SectionIntegrator):
         # Rotate section in order to have neutral axis horizontal
         angle = -atan2(strain[2], strain[1])
 
-        rotated_geom = geo.rotate(angle)
+        rotated_geom = self._rotated_geometry(geo, angle)
         # If integration_data is present, rotate it too
         integration_data = kwargs.get('integration_data')
         if integration_data is not None:
